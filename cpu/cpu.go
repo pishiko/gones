@@ -1,8 +1,6 @@
 package cpu
 
 import (
-	"fmt"
-
 	"github.com/pishiko/gones/ppu"
 )
 
@@ -25,6 +23,7 @@ var (
 		/*0xE0*/ 2, 6, 3, 8, 3, 3, 5, 5, 2, 2, 2, 2, 4, 4, 6, 6,
 		/*0xF0*/ 2, 5, 2, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7,
 	}
+	debugCounter = 7
 )
 
 //CPU CPU
@@ -42,14 +41,7 @@ type CPU struct {
 	isKeyReset     bool
 	keyCounter     int
 	addtionalCycle int
-}
-
-func (c *CPU) excute(opcode uint8) int {
-	//fmt.Printf("[0x%x] %v ### %v\n", c.PC, runtime.FuncForPC(reflect.ValueOf(c.opTable[opcode]).Pointer()).Name(), runtime.FuncForPC(reflect.ValueOf(c.adrTable[opcode]).Pointer()).Name())
-	c.opTable[opcode](c.adrTable[opcode]())
-	a := c.addtionalCycle
-	c.addtionalCycle = 0
-	return cycles[opcode] + a
+	isNoAddrOP     bool
 }
 
 //NewCPU Constructer
@@ -59,7 +51,7 @@ func NewCPU(prg []uint8, keys [8]bool) *CPU {
 	cpu.SP = 0xFD
 	cpu.wRAM = [0x0800]uint8{}
 	cpu.R = true
-	cpu.B = true
+	cpu.B = false
 	cpu.I = true
 	cpu.keys = keys
 
@@ -82,27 +74,44 @@ func NewCPU(prg []uint8, keys [8]bool) *CPU {
 		cpu.BEQ, cpu.SBC, cpu.NOP, cpu.NOP, cpu.NOP, cpu.SBC, cpu.INC, cpu.NOP, cpu.SED, cpu.SBC, cpu.NOP, cpu.NOP, cpu.NOP, cpu.SBC, cpu.INC, cpu.NOP,
 	}
 	cpu.adrTable = [256]func() uint16{
-		cpu.implied, cpu.Xindirect, cpu.noAdressing, cpu.noAdressing, cpu.noAdressing, cpu.zeropage, cpu.zeropage, cpu.noAdressing, cpu.implied, cpu.immediate, cpu.accumulator, cpu.noAdressing, cpu.noAdressing, cpu.absolute, cpu.absolute, cpu.noAdressing,
-		cpu.relative, cpu.indirectY, cpu.noAdressing, cpu.noAdressing, cpu.noAdressing, cpu.zeropageX, cpu.zeropageX, cpu.noAdressing, cpu.implied, cpu.absoluteY, cpu.noAdressing, cpu.noAdressing, cpu.noAdressing, cpu.absoluteX, cpu.absoluteX, cpu.noAdressing,
-		cpu.absolute, cpu.Xindirect, cpu.noAdressing, cpu.noAdressing, cpu.zeropage, cpu.zeropage, cpu.zeropage, cpu.noAdressing, cpu.implied, cpu.immediate, cpu.accumulator, cpu.noAdressing, cpu.absolute, cpu.absolute, cpu.absolute, cpu.noAdressing,
-		cpu.relative, cpu.indirectY, cpu.noAdressing, cpu.noAdressing, cpu.noAdressing, cpu.zeropageX, cpu.zeropageX, cpu.noAdressing, cpu.implied, cpu.absoluteY, cpu.noAdressing, cpu.noAdressing, cpu.noAdressing, cpu.absoluteX, cpu.absoluteX, cpu.noAdressing,
-		cpu.implied, cpu.Xindirect, cpu.noAdressing, cpu.noAdressing, cpu.noAdressing, cpu.zeropage, cpu.zeropage, cpu.noAdressing, cpu.implied, cpu.immediate, cpu.accumulator, cpu.noAdressing, cpu.absolute, cpu.absolute, cpu.absolute, cpu.noAdressing,
-		cpu.relative, cpu.indirectY, cpu.noAdressing, cpu.noAdressing, cpu.noAdressing, cpu.zeropageX, cpu.zeropageX, cpu.noAdressing, cpu.implied, cpu.absoluteY, cpu.noAdressing, cpu.noAdressing, cpu.noAdressing, cpu.absoluteX, cpu.absoluteX, cpu.noAdressing,
-		cpu.implied, cpu.Xindirect, cpu.noAdressing, cpu.noAdressing, cpu.noAdressing, cpu.zeropage, cpu.zeropage, cpu.noAdressing, cpu.implied, cpu.immediate, cpu.accumulator, cpu.noAdressing, cpu.indirect, cpu.absolute, cpu.absolute, cpu.noAdressing,
-		cpu.relative, cpu.indirectY, cpu.noAdressing, cpu.noAdressing, cpu.noAdressing, cpu.zeropageX, cpu.zeropageX, cpu.noAdressing, cpu.implied, cpu.absoluteY, cpu.noAdressing, cpu.noAdressing, cpu.noAdressing, cpu.absoluteX, cpu.absoluteX, cpu.noAdressing,
-		cpu.noAdressing, cpu.Xindirect, cpu.noAdressing, cpu.noAdressing, cpu.zeropage, cpu.zeropage, cpu.zeropage, cpu.noAdressing, cpu.implied, cpu.noAdressing, cpu.implied, cpu.noAdressing, cpu.absolute, cpu.absolute, cpu.absolute, cpu.noAdressing,
-		cpu.relative, cpu.indirectY, cpu.noAdressing, cpu.noAdressing, cpu.zeropageX, cpu.zeropageX, cpu.zeropageY, cpu.noAdressing, cpu.implied, cpu.absoluteY, cpu.implied, cpu.noAdressing, cpu.noAdressing, cpu.absoluteX, cpu.noAdressing, cpu.noAdressing,
-		cpu.immediate, cpu.Xindirect, cpu.immediate, cpu.noAdressing, cpu.zeropage, cpu.zeropage, cpu.zeropage, cpu.noAdressing, cpu.implied, cpu.immediate, cpu.implied, cpu.noAdressing, cpu.absolute, cpu.absolute, cpu.absolute, cpu.noAdressing,
-		cpu.relative, cpu.indirectY, cpu.noAdressing, cpu.noAdressing, cpu.zeropageX, cpu.zeropageX, cpu.zeropageY, cpu.noAdressing, cpu.implied, cpu.absoluteY, cpu.implied, cpu.noAdressing, cpu.absoluteX, cpu.absoluteX, cpu.absoluteY, cpu.noAdressing,
-		cpu.immediate, cpu.Xindirect, cpu.noAdressing, cpu.noAdressing, cpu.zeropage, cpu.zeropage, cpu.zeropage, cpu.noAdressing, cpu.implied, cpu.immediate, cpu.implied, cpu.noAdressing, cpu.absolute, cpu.absolute, cpu.absolute, cpu.noAdressing,
-		cpu.relative, cpu.indirectY, cpu.noAdressing, cpu.noAdressing, cpu.noAdressing, cpu.zeropageX, cpu.zeropageX, cpu.noAdressing, cpu.implied, cpu.absoluteY, cpu.noAdressing, cpu.noAdressing, cpu.noAdressing, cpu.absoluteX, cpu.absoluteX, cpu.noAdressing,
-		cpu.immediate, cpu.Xindirect, cpu.noAdressing, cpu.noAdressing, cpu.zeropage, cpu.zeropage, cpu.zeropage, cpu.noAdressing, cpu.implied, cpu.immediate, cpu.implied, cpu.noAdressing, cpu.absolute, cpu.absolute, cpu.absolute, cpu.noAdressing,
-		cpu.relative, cpu.indirectY, cpu.noAdressing, cpu.noAdressing, cpu.noAdressing, cpu.zeropageX, cpu.zeropageX, cpu.noAdressing, cpu.implied, cpu.absoluteY, cpu.noAdressing, cpu.noAdressing, cpu.noAdressing, cpu.absoluteX, cpu.absoluteX, cpu.noAdressing,
+		/*0x00*/ cpu.implied, cpu.Xindirect, cpu.noAdressing, cpu.noAdressing, cpu.zeropage, cpu.zeropage, cpu.zeropage, cpu.noAdressing, cpu.implied, cpu.immediate, cpu.accumulator, cpu.noAdressing, cpu.absolute, cpu.absolute, cpu.absolute, cpu.noAdressing,
+		/*0x10*/ cpu.relative, cpu.indirectY, cpu.noAdressing, cpu.noAdressing, cpu.zeropageX, cpu.zeropageX, cpu.zeropageX, cpu.noAdressing, cpu.implied, cpu.absoluteY, cpu.noAdressing, cpu.noAdressing, cpu.absoluteX, cpu.absoluteX, cpu.absoluteX, cpu.noAdressing,
+		/*0x20*/ cpu.absolute, cpu.Xindirect, cpu.noAdressing, cpu.noAdressing, cpu.zeropage, cpu.zeropage, cpu.zeropage, cpu.noAdressing, cpu.implied, cpu.immediate, cpu.accumulator, cpu.noAdressing, cpu.absolute, cpu.absolute, cpu.absolute, cpu.noAdressing,
+		/*0x30*/ cpu.relative, cpu.indirectY, cpu.noAdressing, cpu.noAdressing, cpu.zeropageX, cpu.zeropageX, cpu.zeropageX, cpu.noAdressing, cpu.implied, cpu.absoluteY, cpu.noAdressing, cpu.noAdressing, cpu.absoluteX, cpu.absoluteX, cpu.absoluteX, cpu.noAdressing,
+		/*0x40*/ cpu.implied, cpu.Xindirect, cpu.noAdressing, cpu.noAdressing, cpu.zeropage, cpu.zeropage, cpu.zeropage, cpu.noAdressing, cpu.implied, cpu.immediate, cpu.accumulator, cpu.noAdressing, cpu.absolute, cpu.absolute, cpu.absolute, cpu.noAdressing,
+		/*0x50*/ cpu.relative, cpu.indirectY, cpu.noAdressing, cpu.noAdressing, cpu.zeropageX, cpu.zeropageX, cpu.zeropageX, cpu.noAdressing, cpu.implied, cpu.absoluteY, cpu.noAdressing, cpu.noAdressing, cpu.absoluteX, cpu.absoluteX, cpu.absoluteX, cpu.noAdressing,
+		/*0x60*/ cpu.implied, cpu.Xindirect, cpu.noAdressing, cpu.noAdressing, cpu.zeropage, cpu.zeropage, cpu.zeropage, cpu.noAdressing, cpu.implied, cpu.immediate, cpu.accumulator, cpu.noAdressing, cpu.indirect, cpu.absolute, cpu.absolute, cpu.noAdressing,
+		/*0x70*/ cpu.relative, cpu.indirectY, cpu.noAdressing, cpu.noAdressing, cpu.zeropageX, cpu.zeropageX, cpu.zeropageX, cpu.noAdressing, cpu.implied, cpu.absoluteY, cpu.noAdressing, cpu.noAdressing, cpu.absoluteX, cpu.absoluteX, cpu.absoluteX, cpu.noAdressing,
+		/*0x80*/ cpu.immediate, cpu.Xindirect, cpu.immediate, cpu.noAdressing, cpu.zeropage, cpu.zeropage, cpu.zeropage, cpu.noAdressing, cpu.implied, cpu.immediate, cpu.implied, cpu.noAdressing, cpu.absolute, cpu.absolute, cpu.absolute, cpu.noAdressing,
+		/*0x90*/ cpu.relative, cpu.indirectY, cpu.noAdressing, cpu.noAdressing, cpu.zeropageX, cpu.zeropageX, cpu.zeropageY, cpu.noAdressing, cpu.implied, cpu.absoluteY, cpu.implied, cpu.noAdressing, cpu.noAdressing, cpu.absoluteX, cpu.noAdressing, cpu.noAdressing,
+		/*0xA0*/ cpu.immediate, cpu.Xindirect, cpu.immediate, cpu.noAdressing, cpu.zeropage, cpu.zeropage, cpu.zeropage, cpu.noAdressing, cpu.implied, cpu.immediate, cpu.implied, cpu.noAdressing, cpu.absolute, cpu.absolute, cpu.absolute, cpu.noAdressing,
+		/*0xB0*/ cpu.relative, cpu.indirectY, cpu.noAdressing, cpu.noAdressing, cpu.zeropageX, cpu.zeropageX, cpu.zeropageY, cpu.noAdressing, cpu.implied, cpu.absoluteY, cpu.implied, cpu.noAdressing, cpu.absoluteX, cpu.absoluteX, cpu.absoluteY, cpu.noAdressing,
+		/*0xC0*/ cpu.immediate, cpu.Xindirect, cpu.immediate, cpu.noAdressing, cpu.zeropage, cpu.zeropage, cpu.zeropage, cpu.noAdressing, cpu.implied, cpu.immediate, cpu.implied, cpu.noAdressing, cpu.absolute, cpu.absolute, cpu.absolute, cpu.noAdressing,
+		/*0xD0*/ cpu.relative, cpu.indirectY, cpu.noAdressing, cpu.noAdressing, cpu.zeropageX, cpu.zeropageX, cpu.zeropageX, cpu.noAdressing, cpu.implied, cpu.absoluteY, cpu.noAdressing, cpu.noAdressing, cpu.absoluteX, cpu.absoluteX, cpu.absoluteX, cpu.noAdressing,
+		/*0xE0*/ cpu.immediate, cpu.Xindirect, cpu.immediate, cpu.noAdressing, cpu.zeropage, cpu.zeropage, cpu.zeropage, cpu.noAdressing, cpu.implied, cpu.immediate, cpu.implied, cpu.noAdressing, cpu.absolute, cpu.absolute, cpu.absolute, cpu.noAdressing,
+		/*0xF0*/ cpu.relative, cpu.indirectY, cpu.noAdressing, cpu.noAdressing, cpu.zeropageX, cpu.zeropageX, cpu.zeropageX, cpu.noAdressing, cpu.implied, cpu.absoluteY, cpu.noAdressing, cpu.noAdressing, cpu.absoluteX, cpu.absoluteX, cpu.absoluteX, cpu.noAdressing,
 	}
 
-	fmt.Printf("[Init CPU] Program Size:0x%x\n", len(cpu.prgROM))
+	//fmt.Printf("[Init CPU] Program Size:0x%x\n", len(cpu.prgROM))
 	cpu.RESET()
 	return cpu
+}
+
+func (c *CPU) excute(opcode uint8) int {
+	// fmt.Printf("%04X %02X %16s A:%02X X:%02X Y:%02X P:%02X SP:%02X CYCLE:%d \n", c.PC-1, opcode,
+	// 	strings.Replace(strings.Replace(runtime.FuncForPC(reflect.ValueOf(c.opTable[opcode]).Pointer()).Name()+runtime.FuncForPC(reflect.ValueOf(c.adrTable[opcode]).Pointer()).Name(), "github.com/pishiko/gones/cpu.(*CPU).", "", 2), "fm", "", 2),
+	// 	c.A, c.X, c.Y, c.getP(), c.SP, debugCounter)
+
+	// fmt.Printf("%0X\n", c.PC-1)
+
+	c.opTable[opcode](c.adrTable[opcode]())
+	c.isNoAddrOP = false
+
+	a := c.addtionalCycle
+	c.addtionalCycle = 0
+	cycle := cycles[opcode] + a
+	debugCounter += cycle
+	return cycle
 }
 
 func (c *CPU) read(addr uint16) uint8 {
@@ -125,8 +134,11 @@ func (c *CPU) read(addr uint16) uint8 {
 				return 0x00
 			}
 		}
-	case addr < 0xFFFF:
+	case addr < 0xbfff:
 		return c.prgROM[addr-0x8000]
+	case addr < 0xffff:
+		//Mapper 0 Mirror
+		return c.prgROM[addr-0xc000]
 	}
 	//CANT REACH HERE!
 	return 0
@@ -182,6 +194,11 @@ func (c *CPU) Run(keys [8]bool) int {
 		if keys[k] {
 			c.keys[k] = true
 		}
+	}
+	if c.PPU.IsNMIOccured {
+		c.PPU.IsNMIOccured = false
+		c.NMI()
+		return 0
 	}
 	opcode := c.read(c.PC)
 	c.PC++

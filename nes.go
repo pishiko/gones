@@ -81,7 +81,6 @@ func (n *NES) Update() error {
 
 func (n *NES) init() {
 	ebiten.SetWindowSize(256*3, 240*3)
-	//n.DrawTile(n.ppu.GetTiles())
 }
 
 func (n *NES) Run() {

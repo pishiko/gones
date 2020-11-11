@@ -21,7 +21,7 @@ func Load(path string) ([]uint8, []uint8) {
 }
 
 func main() {
-	prg, chr := Load("roms/giko009.nes")
+	prg, chr := Load("roms/giko011.nes")
 
 	nes := NewNES(prg, chr)
 	nes.Run()

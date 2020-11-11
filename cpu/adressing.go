@@ -1,10 +1,7 @@
 package cpu
 
-import "encoding/binary"
-
 func (c *CPU) _read16(addr uint16) uint16 {
-	return binary.LittleEndian.Uint16(c.prgROM[addr-0x8000 : addr-0x8000+2])
-	//return (uint16(c.read(addr+0x0001)) << 8) + uint16(c.read(addr))
+	return (uint16(c.read(addr+0x0001)) << 8) + uint16(c.read(addr))
 }
 
 func uint2int(n uint8) int {
@@ -12,10 +9,12 @@ func uint2int(n uint8) int {
 }
 
 func (c *CPU) accumulator() uint16 {
+	c.isNoAddrOP = true
 	return 0x0000
 }
 
 func (c *CPU) implied() uint16 {
+	c.isNoAddrOP = true
 	return 0x0000
 }
 
@@ -56,20 +55,22 @@ func (c *CPU) absoluteY() uint16 {
 
 func (c *CPU) indirect() uint16 {
 	c.PC += 0x0002
-	addr := c._read16(c.PC - 0x0002)
-	return c._read16(addr)
+	addrUp := c.read(c.PC - 0x0001)
+	addrLow := c.read(c.PC - 0x0002)
+
+	return (uint16(c.read((uint16(addrUp)<<8)+uint16(addrLow+0x01))) << 8) + uint16(c.read((uint16(addrUp)<<8)+uint16(addrLow)))
 }
 
 func (c *CPU) Xindirect() uint16 {
 	c.PC++
-	addr := uint16(c.read(c.PC-0x0001)) + uint16(c.X)
-	return c._read16(addr)
+	addr := c.read(c.PC-0x0001) + c.X
+	return (uint16(c.read(uint16(addr+0x01))) << 8) + uint16(c.read(uint16(addr)))
 }
 
 func (c *CPU) indirectY() uint16 {
 	c.PC++
-	addr := uint16(c.read(c.PC - 0x0001))
-	return c._read16(addr) + uint16(c.Y)
+	addr := c.read(c.PC - 0x0001)
+	return uint16(c.read(uint16(addr+0x01)))<<8 + uint16(c.read(uint16(addr))) + uint16(c.Y)
 }
 
 func (c *CPU) relative() uint16 {

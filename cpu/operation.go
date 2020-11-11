@@ -52,11 +52,11 @@ func (c *CPU) ADC(m uint16) {
 	data := c.read(m)
 	aFuture := c.A + data
 	if c.C {
-		aFuture++
+		aFuture += 0x01
 	}
 
 	c.C = c.A > aFuture
-	c.V = (c.A^data) == 0x00 && (c.A^aFuture) != 0x00
+	c.V = !((c.A^data)&0x80 != 0x00) && (c.A^aFuture)&0x80 != 0x00
 	c.A = aFuture
 	c.setNZ(c.A)
 	return
@@ -66,11 +66,11 @@ func (c *CPU) SBC(m uint16) {
 	data := c.read(m)
 	aFuture := c.A - data
 	if !c.C {
-		aFuture--
+		aFuture -= 0x01
 	}
 
 	c.C = c.A >= aFuture
-	c.V = (c.A^data) == 0x00 && (c.A^aFuture) != 0x00
+	c.V = ((c.A^data)&0x80) != 0x00 && ((c.A^aFuture)&0x80) != 0x00
 	c.A = aFuture
 	c.setNZ(c.A)
 	return
@@ -96,39 +96,79 @@ func (c *CPU) EOR(m uint16) {
 }
 
 //シフト・ローテーション
-func (c *CPU) ASL(_ uint16) {
-	c.C = c.A&0x80 != 0x00
-	c.A = c.A << 1
-	c.setNZ(c.A)
-	return
-}
-
-func (c *CPU) LSR(_ uint16) {
-	c.C = c.A&0x01 != 0x00
-	c.A = c.A >> 1
-	c.setNZ(c.A)
-	return
-}
-
-func (c *CPU) ROL(_ uint16) {
-	aFuture := c.A << 1
-	if c.C {
-		aFuture++
+func (c *CPU) ASL(m uint16) {
+	if c.isNoAddrOP {
+		c.C = c.A&0x80 != 0x00
+		c.A = c.A << 1
+		c.setNZ(c.A)
+	} else {
+		data := c.read(m)
+		c.C = data&0x80 != 0x00
+		data = data << 1
+		c.setNZ(data)
+		c.write(m, data)
 	}
-	c.C = c.A&0x01 != 0x00
-	c.A = aFuture
-	c.setNZ(c.A)
 	return
 }
 
-func (c *CPU) ROR(_ uint16) {
-	aFuture := c.A >> 1
-	if c.C {
-		aFuture += 0x80
+func (c *CPU) LSR(m uint16) {
+	if c.isNoAddrOP {
+		c.C = c.A&0x01 != 0x00
+		c.A = c.A >> 1
+		c.setNZ(c.A)
+	} else {
+		data := c.read(m)
+		c.C = data&0x01 != 0x00
+		data = data >> 1
+		c.setNZ(data)
+		c.write(m, data)
 	}
-	c.C = c.A&0x01 != 0x00
-	c.A = aFuture
-	c.setNZ(c.A)
+	return
+}
+
+func (c *CPU) ROL(m uint16) {
+	if c.isNoAddrOP {
+		futureC := c.A&0x80 != 0x00
+		c.A = c.A << 1
+		if c.C {
+			c.A += 0x01
+		}
+		c.C = futureC
+		c.setNZ(c.A)
+	} else {
+		data := c.read(m)
+		futureC := data&0x80 != 0x00
+		data = data << 1
+		if c.C {
+			data += 0x01
+		}
+		c.C = futureC
+		c.setNZ(data)
+		c.write(m, data)
+	}
+	return
+}
+
+func (c *CPU) ROR(m uint16) {
+	if c.isNoAddrOP {
+		futureC := c.A&0x01 != 0x00
+		c.A = c.A >> 1
+		if c.C {
+			c.A += 0x80
+		}
+		c.C = futureC
+		c.setNZ(c.A)
+	} else {
+		data := c.read(m)
+		futureC := data&0x01 != 0x00
+		data = data >> 1
+		if c.C {
+			data += 0x80
+		}
+		c.C = futureC
+		c.setNZ(data)
+		c.write(m, data)
+	}
 	return
 }
 
@@ -192,7 +232,7 @@ func (c *CPU) BMI(addr uint16) {
 //ビット検査
 func (c *CPU) BIT(m uint16) {
 	data := c.read(m)
-	c.Z = c.A&data != 0x00
+	c.Z = c.A&data == 0x00
 	c.N = data&0x80 != 0x00
 	c.V = data&0x40 != 0x00
 	return
@@ -224,7 +264,9 @@ func (c *CPU) BRK(_ uint16) {
 		c.PC++
 		c.push(uint8(c.PC >> 8))
 		c.push(uint8(c.PC & 0x00ff))
-		c.push(c.getP())
+		p := c.getP()
+		p = p&0xcf + 0x30
+		c.push(p)
 		c.I = true
 		c.PC = (uint16(c.read(0xffff)) << 8) + uint16(c.read(0xfffe))
 	}
@@ -232,7 +274,7 @@ func (c *CPU) BRK(_ uint16) {
 }
 
 func (c *CPU) RTI(_ uint16) {
-	c.setP(c.pop())
+	c.setP((c.pop() & 0xcf) + (c.getP() & 0x30))
 	wordL := c.pop()
 	wordU := c.pop()
 	c.PC = (uint16(wordU) << 8) + uint16(wordL)
@@ -242,21 +284,21 @@ func (c *CPU) RTI(_ uint16) {
 //比較
 func (c *CPU) CMP(m uint16) {
 	a := c.A - c.read(m)
-	c.C = a >= c.A
+	c.C = a <= c.A
 	c.setNZ(a)
 	return
 }
 
 func (c *CPU) CPX(m uint16) {
 	a := c.X - c.read(m)
-	c.C = a >= c.X
+	c.C = a <= c.X
 	c.setNZ(a)
 	return
 }
 
 func (c *CPU) CPY(m uint16) {
 	a := c.Y - c.read(m)
-	c.C = a >= c.Y
+	c.C = a <= c.Y
 	c.setNZ(a)
 	return
 }
@@ -397,11 +439,13 @@ func (c *CPU) PLA(_ uint16) {
 	return
 }
 func (c *CPU) PHP(_ uint16) {
-	c.push(c.getP())
+	p := c.getP()
+	p = p&0xcf + 0x30
+	c.push(p)
 	return
 }
 func (c *CPU) PLP(_ uint16) {
-	c.setP(c.pop())
+	c.setP((c.pop() & 0xcf) + (c.getP() & 0x30))
 	return
 }
 
@@ -415,16 +459,16 @@ func (c *CPU) NMI() {
 	c.B = false
 	c.push(uint8(c.PC >> 8))
 	c.push(uint8(c.PC & 0x00ff))
-	c.push(c.getP())
+	c.push(c.getP()&0xcf + 0x20)
 	c.I = true
-	c.PC = (uint16(c.read(0xfffb)) << 8) + uint16(c.read(0xfffa))
+	c.PC = (uint16(c.read(0xfffb-0x8000+uint16(len(c.prgROM)))) << 8) + uint16(c.read(0xfffa-0x8000+uint16(len(c.prgROM))))
 }
 func (c *CPU) IRQ() {
 	if !c.I {
 		c.B = false
 		c.push(uint8(c.PC >> 8))
 		c.push(uint8(c.PC & 0x00ff))
-		c.push(c.getP())
+		c.push(c.getP()&0xcf + 0x20)
 		c.I = true
 		c.PC = (uint16(c.read(0xffff)) << 8) + uint16(c.read(0xfffe))
 	}
@@ -432,10 +476,8 @@ func (c *CPU) IRQ() {
 }
 func (c *CPU) RESET() {
 	c.I = true
-	if len(c.prgROM) < 0x8000 {
-		c.PC = 0x8000
-	} else {
-		c.PC = (uint16(c.read(0xfffd)) << 8) + uint16(c.read(0xfffc))
-	}
+	c.PC = 0xc000
+	//c.PC = (uint16(c.read(0xfffd-0x8000+uint16(len(c.prgROM)))) << 8) + uint16(c.read(0xfffc-0x8000+uint16(len(c.prgROM))))
+
 	return
 }

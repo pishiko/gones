@@ -1,11 +1,10 @@
 package ppu
 
 //TODO
-//CtrlReg1 7,5,1-0
+//CtrlReg1 5,1-0
 //CtrlReg2 2,1,0
 
 import (
-	"fmt"
 	"image"
 	"image/color"
 
@@ -48,11 +47,15 @@ type PPU struct {
 	vRAM           [0x4000]uint8
 	statusRegister uint8
 	//other
-	tiles      [][4]*ebiten.Image
-	background *ebiten.Image
-	sprites    *ebiten.Image
-	cycle      int
-	line       int
+	tiles            [][4]*ebiten.Image
+	background       *ebiten.Image
+	sprites          *ebiten.Image
+	cycle            int
+	line             int
+	IsNMIOccured     bool
+	scrollX          uint8
+	scrollY          uint8
+	isScrollCounterY bool
 	//Ctrl Regs
 	ctrlReg1 uint8
 	ctrlReg2 uint8
@@ -69,7 +72,7 @@ func NewPPU(chr []uint8) *PPU {
 	p.ctrlReg1 = 0x40
 	p.InitTiles()
 
-	fmt.Printf("[Init PPU] Character Size:0x%x\n", len(chr))
+	//fmt.Printf("[Init PPU] Character Size:0x%x\n", len(chr))
 	return p
 }
 
@@ -79,11 +82,16 @@ func (p *PPU) Run(cycle int) bool {
 	if p.cycle > 341 {
 		p.cycle -= 341
 		p.line++
-		if p.line%8 == 0 && p.line < 240 {
-			p.drawLine()
-		}
-		if p.line == 240 {
+		if p.line < 240 {
+			if p.line%8 == 0 {
+				p.drawBGLine()
+			}
+			p.drawSpLine()
+		} else if p.line == 240 {
 			p.statusRegister = (p.statusRegister & 0x7f) + 0x80
+			if p.ctrlReg1&0x80 != 0x00 {
+				p.IsNMIOccured = true
+			}
 			return true
 		} else if p.line == 262 {
 			p.resetBG()
@@ -119,7 +127,7 @@ func (p *PPU) Draw() (bg *ebiten.Image, sprites *ebiten.Image) {
 	return p.background, p.sprites
 }
 
-func (p *PPU) drawLine() {
+func (p *PPU) drawBGLine() {
 	tiley := p.line / 8
 	//Read Name Table
 	ntindex := 0x2000 + 0x20*tiley
@@ -144,12 +152,16 @@ func (p *PPU) drawLine() {
 
 		for i := 0; i < 4; i++ {
 			op := &ebiten.DrawImageOptions{}
-			op.GeoM.Translate(float64(tilex*8), float64(tiley*8))
+			op.GeoM.Translate(float64(uint8(tilex)*8+p.scrollX), float64(uint8(tiley)*8+p.scrollY))
 			c := nesColor[p.vRAM[pHead+i]]
 			op.ColorM.Scale(float64(c[0]), float64(c[1]), float64(c[2]), 1)
 			p.background.DrawImage(p.tiles[int(nameTable[tilex])+bgPatternOffset][i], op)
 		}
 	}
+	return
+}
+
+func (p *PPU) drawSpLine() {
 	//SPRITES
 	var spPatternOffset int
 	if p.ctrlReg1&0x08 != 0x00 {
@@ -163,14 +175,19 @@ func (p *PPU) drawLine() {
 		tile := p.OAM[i*4+1]
 		attr := p.OAM[i*4+2]
 		x := p.OAM[i*4+3]
-		if p.line-8 <= y && y < p.line {
+		if p.line == y {
 			spCounter++
 			if spCounter == 9 {
 				p.statusRegister = (p.statusRegister & 0xdf) + 0x20
 				break
 			}
-			pHead := 0x3f10 + int(attr&0x03)*4
 
+			//0 Bomb
+			if tile == 0x00 {
+				p.statusRegister = 0x40 + (p.statusRegister & 0xbf)
+			}
+
+			pHead := 0x3f10 + int(attr&0x03)*4
 			//01-11
 			for j := 1; j < 4; j++ {
 				c := nesColor[p.vRAM[pHead+j]]
@@ -207,7 +224,12 @@ func (p *PPU) WriteRegister(addr uint16, data uint8) {
 		p.OAM[p.OAMAddr] = data
 		p.OAMAddr++
 	case 0x2005:
-		//BACKGROUND OFFSET
+		if !p.isScrollCounterY {
+			p.scrollX = data
+			p.isScrollCounterY = true
+		} else {
+			p.scrollY = data
+		}
 	case 0x2006:
 		if p.isPPUAddrUp {
 			p.PPUAddr = uint16(data) << 8
@@ -232,8 +254,8 @@ func (p *PPU) ReadRegister(addr uint16) uint8 {
 	case 0x2002:
 		ret := p.statusRegister
 		p.statusRegister &= 0x7f
+		p.isScrollCounterY = false
 		return ret
-		//TODO Reset 2005
 	case 0x2007:
 		ret := p.vRAM[p.PPUAddr]
 		if p.ctrlReg1&0x04 != 0x00 {
@@ -279,18 +301,4 @@ func (p *PPU) InitTiles() {
 	}
 	p.tiles = t
 	return
-}
-
-func (p *PPU) GetTiles() [][]uint8 {
-	out := make([][]uint8, len(p.tiles))
-	// for i := 0; i < len(p.tiles); i++ {
-	// 	out[i] = p.tiles[i][:]
-	// 	for j := 0; j < 64; j++ {
-	// 		px := 0x55 * p.tiles[i][j*4]
-	// 		out[i][j*4] = px
-	// 		out[i][j*4+1] = px
-	// 		out[i][j*4+2] = px
-	// 	}
-	// }
-	return out
 }
