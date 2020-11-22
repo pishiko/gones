@@ -1,7 +1,7 @@
 package ppu
 
 //TODO
-//CtrlReg1 5,1-0
+//CtrlReg1 5
 //CtrlReg2 2,1,0
 
 import (
@@ -31,13 +31,15 @@ var (
 		{0x99, 0xFF, 0xFC}, {0xDD, 0xDD, 0xDD}, {0x11, 0x11, 0x11}, {0x11, 0x11, 0x11},
 	}
 	bgColor = [4]color.Color{
-		color.RGBA{0x00, 0x00, 0x00, 0xff}, color.RGBA{0x00, 0xff, 0x00, 0xff},
+		color.RGBA{0xff, 0x00, 0xff, 0xff}, color.RGBA{0x00, 0xff, 0x00, 0xff},
 		color.RGBA{0x00, 0x00, 0xff, 0xff}, color.RGBA{0xff, 0x00, 0x00, 0xff},
 	}
 )
 
 type PPU struct {
+	////////////////////////////////////////////////////////////////
 	//Reg,RAM
+
 	ioRegister     [0x08]uint8
 	chrRom         []uint8
 	OAMAddr        uint8
@@ -46,7 +48,13 @@ type PPU struct {
 	PPUAddr        uint16
 	vRAM           [0x4000]uint8
 	statusRegister uint8
+	ctrlReg1       uint8
+	ctrlReg2       uint8
+	ppuBuffer      uint8
+
+	////////////////////////////////////////////////////////////////
 	//other
+
 	tiles            [][4]*ebiten.Image
 	background       *ebiten.Image
 	sprites          *ebiten.Image
@@ -56,12 +64,12 @@ type PPU struct {
 	scrollX          uint8
 	scrollY          uint8
 	isScrollCounterY bool
-	//Ctrl Regs
-	ctrlReg1 uint8
-	ctrlReg2 uint8
+	//0->true
+	isHorizontalMirror bool
+	backgroundPallet   [4 * 0x0400]uint8
 }
 
-func NewPPU(chr []uint8) *PPU {
+func NewPPU(chr []uint8, isHorizontalMirror bool) *PPU {
 	p := &PPU{}
 	p.chrRom = chr
 	p.OAM = [0x0100]uint8{0}
@@ -70,6 +78,7 @@ func NewPPU(chr []uint8) *PPU {
 	p.background = ebiten.NewImage(256, 240)
 	p.sprites = ebiten.NewImage(256, 240)
 	p.ctrlReg1 = 0x40
+	p.isHorizontalMirror = isHorizontalMirror
 	p.InitTiles()
 
 	//fmt.Printf("[Init PPU] Character Size:0x%x\n", len(chr))
@@ -83,23 +92,50 @@ func (p *PPU) Run(cycle int) bool {
 		p.cycle -= 341
 		p.line++
 		if p.line < 240 {
+			if p.line == 0 {
+				p.updateBGPallete()
+			}
 			if p.line%8 == 0 {
 				p.drawBGLine()
 			}
 			p.drawSpLine()
-		} else if p.line == 240 {
+		} else if p.line == 241 {
+			//vblank set
 			p.statusRegister = (p.statusRegister & 0x7f) + 0x80
 			if p.ctrlReg1&0x80 != 0x00 {
 				p.IsNMIOccured = true
 			}
 			return true
 		} else if p.line == 262 {
+			//0spritehit and vblank clear
+			p.statusRegister = p.statusRegister & 0x3f
 			p.resetBG()
 			p.sprites.Clear()
-			p.line = 0
+			p.line = -1
 		}
 	}
 	return false
+}
+
+func (p *PPU) updateBGPallete() {
+	for i := 0; i < 4; i++ {
+		head := 0x23c0 + i*0x400
+		for py := 0; py < 8; py++ {
+			for px := 0; px < 8; px++ {
+				for block := 0; block < 4; block++ {
+					color := (p.vRAM[head+py*8+px] >> (block * 2)) & 0x03
+					blocky := block / 2
+					blockx := block % 2
+					index := py*16*8 + px*4 + blocky*32*2 + blockx*2
+					p.backgroundPallet[i*0x400+index] = color
+					p.backgroundPallet[i*0x400+index+1] = color
+					p.backgroundPallet[i*0x400+index+32] = color
+					p.backgroundPallet[i*0x400+index+32+1] = color
+				}
+			}
+		}
+	}
+	return
 }
 
 func (p *PPU) resetBG() {
@@ -129,13 +165,35 @@ func (p *PPU) Draw() (bg *ebiten.Image, sprites *ebiten.Image) {
 
 func (p *PPU) drawBGLine() {
 	tiley := p.line / 8
-	//Read Name Table
-	ntindex := 0x2000 + 0x20*tiley
-	nameTable := p.vRAM[ntindex : ntindex+0x20]
 
-	//Read Pallet Table
-	ptindex := 0x23c0 + 8*tiley
-	palletTable := p.vRAM[ptindex : ptindex+8]
+	tableNum := int(p.ctrlReg1 & 0x03)
+
+	//Read Name Table
+	var head int
+	if int(p.scrollY)+p.line > 240 {
+		//+0x800
+		if tableNum/2 == 0 {
+			head = tableNum*0x400 + 0x20*((p.line+int(p.scrollY)-240)/8) + 0x800
+		} else {
+			head = tableNum*0x400 + 0x20*((p.line+int(p.scrollY)-240)/8) - 0x800
+		}
+	} else {
+		head = tableNum*0x400 + 0x20*((p.line+int(p.scrollY))/8)
+	}
+	xntOffset := int(p.scrollX / 8)
+
+	nameTable := make([]uint8, 0, 32)
+	nameTable = append(nameTable, p.vRAM[0x2000+head+xntOffset:0x2000+head+0x20]...)
+	palletTable := make([]uint8, 0, 32)
+	palletTable = append(palletTable, p.backgroundPallet[head+xntOffset:head+0x20]...)
+
+	if tableNum%2 == 0 {
+		nameTable = append(nameTable, p.vRAM[0x2000+head+0x400:0x2000+head+0x400+xntOffset]...)
+		palletTable = append(palletTable, p.backgroundPallet[head+0x400:head+0x400+xntOffset]...)
+	} else {
+		nameTable = append(nameTable, p.vRAM[0x2000+head-0x400:0x2000+head-0x400+xntOffset]...)
+		palletTable = append(palletTable, p.backgroundPallet[head-0x400:head-0x400+xntOffset]...)
+	}
 
 	//Read Pattern Table
 	var bgPatternOffset int
@@ -147,12 +205,18 @@ func (p *PPU) drawBGLine() {
 
 	//BACKGROUND
 	for tilex := 0; tilex < 0x20; tilex++ {
-		pallet := (palletTable[tilex/4] >> (2 * ((tiley%4/2)*2 + tilex%4/2))) & 0x03
-		pHead := 0x3f00 + int(pallet)*4
+		pHead := 0x3f00 + int(palletTable[tilex])*4
 
-		for i := 0; i < 4; i++ {
+		//0
+		op := &ebiten.DrawImageOptions{}
+		op.GeoM.Translate(float64(tilex*8-int(p.scrollX%8)), float64(tiley*8-int(p.scrollY%8)))
+		c := nesColor[p.vRAM[0x3f00]]
+		op.ColorM.Scale(float64(c[0]), float64(c[1]), float64(c[2]), 1)
+		p.background.DrawImage(p.tiles[int(nameTable[tilex])+bgPatternOffset][0], op)
+		//1-3
+		for i := 1; i < 4; i++ {
 			op := &ebiten.DrawImageOptions{}
-			op.GeoM.Translate(float64(uint8(tilex)*8+p.scrollX), float64(uint8(tiley)*8+p.scrollY))
+			op.GeoM.Translate(float64(tilex*8-int(p.scrollX%8)), float64(tiley*8-int(p.scrollY%8)))
 			c := nesColor[p.vRAM[pHead+i]]
 			op.ColorM.Scale(float64(c[0]), float64(c[1]), float64(c[2]), 1)
 			p.background.DrawImage(p.tiles[int(nameTable[tilex])+bgPatternOffset][i], op)
@@ -183,7 +247,7 @@ func (p *PPU) drawSpLine() {
 			}
 
 			//0 Bomb
-			if tile == 0x00 {
+			if i == 0 {
 				p.statusRegister = 0x40 + (p.statusRegister & 0xbf)
 			}
 
@@ -212,6 +276,88 @@ func (p *PPU) drawSpLine() {
 	return
 }
 
+func (p *PPU) writeVRAM(addr uint16, data uint8) {
+	switch {
+	//pattern Table 0,1
+	case addr < 0x2000:
+		p.vRAM[addr] = data
+
+	//Table 0
+	case addr < 0x2400:
+		p.vRAM[addr] = data
+		p.vRAM[addr+0x1000] = data
+		if p.isHorizontalMirror {
+			p.vRAM[addr+0x0400] = data
+			p.vRAM[addr+0x1400] = data
+		} else {
+			p.vRAM[addr+0x0800] = data
+			p.vRAM[addr+0x1800] = data
+		}
+
+	//Table 1
+	case addr < 0x2800:
+		p.vRAM[addr] = data
+		p.vRAM[addr+0x1000] = data
+		if p.isHorizontalMirror {
+			p.vRAM[addr-0x0400] = data
+			p.vRAM[addr-0x0400+0x1000] = data
+		} else {
+			p.vRAM[addr+0x0800] = data
+			if addr+0x1800 < 0x3f00 {
+				p.vRAM[addr+0x1800] = data //yabai
+			}
+		}
+
+	//Table 2
+	case addr < 0x2c00:
+		p.vRAM[addr] = data
+		p.vRAM[addr+0x1000] = data
+		if p.isHorizontalMirror {
+			p.vRAM[addr+0x0400] = data
+			if addr+0x1400 < 0x3f00 {
+				p.vRAM[addr+0x1400] = data //yabai
+			}
+		} else {
+			p.vRAM[addr-0x800] = data
+			p.vRAM[addr-0x800+0x1000] = data
+		}
+
+	//Table 3
+	case addr < 0x3000:
+		p.vRAM[addr] = data
+		if addr+0x1000 < 0x3f00 {
+			p.vRAM[addr+0x1000] = data //yabai
+		}
+		if p.isHorizontalMirror {
+			p.vRAM[addr-0x0400] = data
+			p.vRAM[addr-0x0400+0x1000] = data
+		} else {
+			p.vRAM[addr-0x800] = data
+			p.vRAM[addr-0x800+0x1000] = data
+		}
+	//Name table mirror
+	case addr < 0x3f00:
+		p.writeVRAM(addr-0x1000, data)
+
+	case addr < 0x3f20:
+		var i uint16
+		p.vRAM[addr] = data
+
+		switch addr {
+		case 0x3f10:
+			p.vRAM[0x3f00] = data
+		}
+		for i = 0; i < 7; i++ {
+			p.vRAM[addr+0x20+i*0x10] = data
+		}
+	case addr < 0x4000:
+		p.writeVRAM(0x3f00+(addr%0x10), data)
+	default:
+		p.vRAM[addr] = data
+	}
+	return
+}
+
 func (p *PPU) WriteRegister(addr uint16, data uint8) {
 	switch addr {
 	case 0x2000:
@@ -228,7 +374,11 @@ func (p *PPU) WriteRegister(addr uint16, data uint8) {
 			p.scrollX = data
 			p.isScrollCounterY = true
 		} else {
-			p.scrollY = data
+			if data < 240 {
+				p.scrollY = data
+			} else {
+				//p.scrollY = 0
+			}
 		}
 	case 0x2006:
 		if p.isPPUAddrUp {
@@ -238,7 +388,11 @@ func (p *PPU) WriteRegister(addr uint16, data uint8) {
 		}
 		p.isPPUAddrUp = !p.isPPUAddrUp
 	case 0x2007:
-		p.vRAM[p.PPUAddr] = data
+		if p.PPUAddr < 0x2000 {
+			p.chrRom[p.PPUAddr] = data
+		} else {
+			p.writeVRAM(p.PPUAddr, data)
+		}
 		if p.ctrlReg1&0x04 != 0x00 {
 			p.PPUAddr += 32
 		} else {
@@ -257,7 +411,16 @@ func (p *PPU) ReadRegister(addr uint16) uint8 {
 		p.isScrollCounterY = false
 		return ret
 	case 0x2007:
-		ret := p.vRAM[p.PPUAddr]
+		var ret uint8
+		if p.PPUAddr < 0x2000 {
+			ret = p.ppuBuffer
+			p.ppuBuffer = p.chrRom[p.PPUAddr]
+		} else if p.PPUAddr < 0x3f00 {
+			ret = p.ppuBuffer
+			p.ppuBuffer = p.vRAM[p.PPUAddr]
+		} else {
+			ret = p.vRAM[p.PPUAddr]
+		}
 		if p.ctrlReg1&0x04 != 0x00 {
 			p.PPUAddr += 32
 		} else {
@@ -271,6 +434,7 @@ func (p *PPU) ReadRegister(addr uint16) uint8 {
 func (p *PPU) InitTiles() {
 	tileSize := len(p.chrRom) / 16
 	t := make([][4]*ebiten.Image, tileSize)
+
 	//tile
 	for i := 0; i < tileSize; i++ {
 		out := [4][]uint8{}

@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"io/ioutil"
 	"log"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
+	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"github.com/pishiko/gones/apu"
 	"github.com/pishiko/gones/cpu"
 	"github.com/pishiko/gones/ppu"
 )
@@ -15,36 +18,61 @@ import (
 var (
 	//A,B,Select,Start,Up,Down,Left,Right
 	keymap = []ebiten.Key{
-		ebiten.KeyX,
-		ebiten.KeyZ,
-		ebiten.KeyTab,
-		ebiten.KeyEscape,
-		ebiten.KeyUp,
-		ebiten.KeyDown,
-		ebiten.KeyLeft,
-		ebiten.KeyRight,
+		ebiten.KeyL,
+		ebiten.KeyK,
+		ebiten.KeyO,
+		ebiten.KeyP,
+		ebiten.KeyW,
+		ebiten.KeyS,
+		ebiten.KeyA,
+		ebiten.KeyD,
 	}
 )
 
 type NES struct {
-	cpu    *cpu.CPU
-	ppu    *ppu.PPU
-	canvas *ebiten.Image
-	keys   [8]bool
+	cpu       *cpu.CPU
+	ppu       *ppu.PPU
+	apu       *apu.APU
+	canvas    *ebiten.Image
+	keys      [8]bool
+	gamepadID ebiten.GamepadID
 }
 
-func NewNES(prg []uint8, chr []uint8) *NES {
+func Load(path string) ([]uint8, []uint8, []uint8) {
+	bytes, err := ioutil.ReadFile(path)
+	if err != nil {
+		panic(err)
+	}
+
+	prgSize := int(bytes[4]) * 0x4000
+	chrSize := int(bytes[5]) * 0x2000
+	prgRom := make([]uint8, prgSize)
+	prgRom = bytes[16 : 16+prgSize]
+	var chrRom []uint8
+	if chrSize != 0 {
+		chrRom = make([]uint8, chrSize)
+		chrRom = bytes[16+prgSize : 16+prgSize+chrSize]
+	} else {
+		chrRom = make([]uint8, 0x2000)
+	}
+
+	return bytes[:16], prgRom, chrRom
+}
+
+func NewNES(path string) *NES {
 	n := new(NES)
 	n.keys = [8]bool{}
-	n.cpu = cpu.NewCPU(prg, n.keys)
-	n.ppu = ppu.NewPPU(chr)
-	n.cpu.PPU = n.ppu
+	header, prg, chr := Load(path)
+	isHorizontalMirror := header[6]&0x01 == 0x00
+	n.ppu = ppu.NewPPU(chr, isHorizontalMirror)
+	n.apu = apu.NewAPU(0)
+	n.cpu = cpu.NewCPU(prg, n.ppu, n.apu)
 	n.canvas = ebiten.NewImage(256, 240)
 	return n
 }
 
 //////////////////////
-//ebiten functions
+//ebiten Callbacks
 
 //Draw はPPUから画面データを受け取り描画
 func (n *NES) Draw(screen *ebiten.Image) {
@@ -52,7 +80,7 @@ func (n *NES) Draw(screen *ebiten.Image) {
 	background, sprites := n.ppu.Draw()
 	n.canvas.DrawImage(background, nil)
 	n.canvas.DrawImage(sprites, nil)
-	ebitenutil.DebugPrint(n.canvas, fmt.Sprintf("FPS:%0.2f", ebiten.CurrentFPS()))
+	ebitenutil.DebugPrint(n.canvas, fmt.Sprintf("TPS:%0.2f", ebiten.CurrentTPS()))
 
 	op := &ebiten.DrawImageOptions{}
 	op.GeoM.Scale(3, 3)
@@ -65,6 +93,11 @@ func (n *NES) Layout(screenWidth, screenHeight int) (int, int) {
 }
 
 func (n *NES) Update() error {
+	//PAD
+	for _, id := range inpututil.JustConnectedGamepadIDs() {
+		n.gamepadID = id
+	}
+	//
 
 	for k := 0; k < 8; k++ {
 		n.keys[k] = ebiten.IsKeyPressed(keymap[k])
@@ -73,6 +106,7 @@ func (n *NES) Update() error {
 	for !isScreenReady {
 		cycle := n.cpu.Run(n.keys)
 		isScreenReady = n.ppu.Run(cycle * 3)
+		n.apu.Run(cycle)
 	}
 	return nil
 }

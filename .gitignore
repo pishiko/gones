@@ -19,3 +19,4 @@ go.sum
 go.mod
 chrout.png
 /logs
+__debug_bin

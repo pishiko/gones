@@ -474,10 +474,3 @@ func (c *CPU) IRQ() {
 	}
 	return
 }
-func (c *CPU) RESET() {
-	c.I = true
-	c.PC = 0xc000
-	//c.PC = (uint16(c.read(0xfffd-0x8000+uint16(len(c.prgROM)))) << 8) + uint16(c.read(0xfffc-0x8000+uint16(len(c.prgROM))))
-
-	return
-}
