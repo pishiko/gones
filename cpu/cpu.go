@@ -30,7 +30,6 @@ var (
 		/*0xF0*/ 2, 5, 2, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7,
 	}
 	debugCounter = 7
-	DEBUGMODE    = false
 )
 
 //CPU CPU
@@ -50,6 +49,9 @@ type CPU struct {
 	keyCounter     int
 	addtionalCycle int
 	isNoAddrOP     bool
+	//DEBUG
+	IsRecord bool
+	DebugLog string
 }
 
 //NewCPU Constructer
@@ -106,21 +108,32 @@ func NewCPU(prg []uint8, ppu *ppu.PPU, apu *apu.APU) *CPU {
 	return cpu
 }
 
+func (c *CPU) GetDebugText() string {
+	// opcode := c.prgROM[c.PC-0x8000-(0x8000-uint16(len(c.prgROM)))]
+	// return fmt.Sprintf("$%04X %02X %16s\nA:%02X X:%02X Y:%02X P:%02X SP:%02X\n", c.PC-1, opcode,
+	// 	strings.Replace(strings.Replace(runtime.FuncForPC(reflect.ValueOf(c.opTable[opcode]).Pointer()).Name()+runtime.FuncForPC(reflect.ValueOf(c.adrTable[opcode]).Pointer()).Name(), "github.com/pishiko/gones/cpu.(*CPU).", "", 2), "fm", "", 2),
+	// 	c.A, c.X, c.Y, c.getP(), c.SP)
+	return fmt.Sprintf("$57:%X $86:%X $45:%X\n", c.wRAM[0x57], c.wRAM[0x86], c.wRAM[0x45])
+}
+
 func (c *CPU) excute(opcode uint8) int {
-	if DEBUGMODE {
-		// if debugCounter >= 100000 {
+	if c.IsRecord {
+		// if debugCounter >= 1000000 {
 		// 	os.Exit(0)
 		// }
 
-		fmt.Printf("%04X %02X %16s A:%02X X:%02X Y:%02X P:%02X SP:%02X CYCLE:%d \n", c.PC-1, opcode,
-			strings.Replace(strings.Replace(runtime.FuncForPC(reflect.ValueOf(c.opTable[opcode]).Pointer()).Name()+runtime.FuncForPC(reflect.ValueOf(c.adrTable[opcode]).Pointer()).Name(), "github.com/pishiko/gones/cpu.(*CPU).", "", 2), "fm", "", 2),
-			c.A, c.X, c.Y, c.getP(), c.SP, debugCounter)
+		c.DebugLog += fmt.Sprintf("%04X %02X %16s A:%02X X:%02X Y:%02X P:%02X SP:%02X\n", c.PC-1, opcode,
+			strings.Replace(strings.Replace(runtime.FuncForPC(reflect.ValueOf(c.opTable[opcode]).Pointer()).Name()+runtime.FuncForPC(reflect.ValueOf(c.adrTable[opcode]).Pointer()).Name(),
+				"github.com/pishiko/gones/cpu.(*CPU).", "", 2), "fm", "", 2),
+			c.A, c.X, c.Y, c.getP(), c.SP)
+		// c.DebugLog += fmt.Sprintf("%04X A:%02X X:%02X Y:%02X P:%02X SP:%02X\n", c.PC-1,
+		// 	c.A, c.X, c.Y, c.getP(), c.SP)
 
 		// fmt.Printf("%0X\n", c.PC-1)
 	}
 
-	c.opTable[opcode](c.adrTable[opcode]())
 	c.isNoAddrOP = false
+	c.opTable[opcode](c.adrTable[opcode]())
 
 	a := c.addtionalCycle
 	c.addtionalCycle = 0
@@ -131,8 +144,10 @@ func (c *CPU) excute(opcode uint8) int {
 
 func (c *CPU) read(addr uint16) uint8 {
 	switch {
-	case addr < 0x2000:
+	case addr < 0x0800:
 		return c.wRAM[addr]
+	case addr < 0x2000:
+		return c.wRAM[addr%0x0800]
 	case addr < 0x2008:
 		return c.ppu.ReadRegister(addr)
 	case addr < 0x4000:
@@ -150,9 +165,7 @@ func (c *CPU) read(addr uint16) uint8 {
 			}
 		//Joypad 2
 		case 0x4017:
-			if DEBUGMODE {
-				fmt.Println("JOYPAD2")
-			}
+			//
 		default:
 			return c.apu.Read(addr)
 		}
@@ -168,8 +181,10 @@ func (c *CPU) read(addr uint16) uint8 {
 
 func (c *CPU) write(addr uint16, data uint8) {
 	switch {
-	case addr < 0x2000:
+	case addr < 0x0800:
 		c.wRAM[addr] = data
+	case addr < 0x2000:
+		c.wRAM[addr%0x0800] = data
 	case addr < 0x2008:
 		c.ppu.WriteRegister(addr, data)
 	case addr < 0x4000:
@@ -192,9 +207,7 @@ func (c *CPU) write(addr uint16, data uint8) {
 			}
 		//Joypad 2
 		case 0x4017:
-			if DEBUGMODE {
-				fmt.Println("JOYPAD2")
-			}
+			//
 		default:
 			c.apu.Write(addr, data)
 		}
@@ -227,7 +240,6 @@ func (c *CPU) Run(keys [8]bool) int {
 	if c.ppu.IsNMIOccured {
 		c.ppu.IsNMIOccured = false
 		c.NMI()
-		return 0
 	}
 	opcode := c.read(c.PC)
 	c.PC++

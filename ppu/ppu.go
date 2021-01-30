@@ -5,6 +5,7 @@ package ppu
 //CtrlReg2 2,1,0
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 
@@ -64,6 +65,7 @@ type PPU struct {
 	scrollX          uint8
 	scrollY          uint8
 	isScrollCounterY bool
+	isUpdateVRAM     bool
 	//0->true
 	isHorizontalMirror bool
 	backgroundPallet   [4 * 0x0400]uint8
@@ -94,6 +96,10 @@ func (p *PPU) Run(cycle int) bool {
 		if p.line < 240 {
 			if p.line == 0 {
 				p.updateBGPallete()
+				if p.isUpdateVRAM {
+					p.isUpdateVRAM = false
+					p.InitTiles()
+				}
 			}
 			if p.line%8 == 0 {
 				p.drawBGLine()
@@ -107,6 +113,7 @@ func (p *PPU) Run(cycle int) bool {
 			}
 			return true
 		} else if p.line == 262 {
+			p.IsNMIOccured = false
 			//0spritehit and vblank clear
 			p.statusRegister = p.statusRegister & 0x3f
 			p.resetBG()
@@ -280,7 +287,8 @@ func (p *PPU) writeVRAM(addr uint16, data uint8) {
 	switch {
 	//pattern Table 0,1
 	case addr < 0x2000:
-		p.vRAM[addr] = data
+		p.isUpdateVRAM = true
+		p.chrRom[addr] = data
 
 	//Table 0
 	case addr < 0x2400:
@@ -353,7 +361,8 @@ func (p *PPU) writeVRAM(addr uint16, data uint8) {
 	case addr < 0x4000:
 		p.writeVRAM(0x3f00+(addr%0x10), data)
 	default:
-		p.vRAM[addr] = data
+		//CANT REACH HERE!
+		fmt.Printf("[vRAM Write %X], ", addr)
 	}
 	return
 }
@@ -388,11 +397,8 @@ func (p *PPU) WriteRegister(addr uint16, data uint8) {
 		}
 		p.isPPUAddrUp = !p.isPPUAddrUp
 	case 0x2007:
-		if p.PPUAddr < 0x2000 {
-			p.chrRom[p.PPUAddr] = data
-		} else {
-			p.writeVRAM(p.PPUAddr, data)
-		}
+		p.writeVRAM(p.PPUAddr, data)
+
 		if p.ctrlReg1&0x04 != 0x00 {
 			p.PPUAddr += 32
 		} else {

@@ -451,6 +451,7 @@ func (c *CPU) PLP(_ uint16) {
 
 //No Operation
 func (c *CPU) NOP(_ uint16) {
+	//println("NOP.")
 	return
 }
 
@@ -461,7 +462,7 @@ func (c *CPU) NMI() {
 	c.push(uint8(c.PC & 0x00ff))
 	c.push(c.getP()&0xcf + 0x20)
 	c.I = true
-	c.PC = (uint16(c.read(0xfffb-0x8000+uint16(len(c.prgROM)))) << 8) + uint16(c.read(0xfffa-0x8000+uint16(len(c.prgROM))))
+	c.PC = (uint16(c.read(0xfffb+(uint16(len(c.prgROM))-0x8000))) << 8) + uint16(c.read(0xfffa+(uint16(len(c.prgROM))-0x8000)))
 }
 func (c *CPU) IRQ() {
 	if !c.I {

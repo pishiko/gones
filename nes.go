@@ -27,6 +27,8 @@ var (
 		ebiten.KeyA,
 		ebiten.KeyD,
 	}
+	pauseBG *ebiten.Image
+	pauseOP *ebiten.DrawImageOptions
 )
 
 type NES struct {
@@ -36,6 +38,10 @@ type NES struct {
 	canvas    *ebiten.Image
 	keys      [8]bool
 	gamepadID ebiten.GamepadID
+	//interface
+	isDebug     bool
+	isPlay      bool
+	isRecording bool
 }
 
 func Load(path string) ([]uint8, []uint8, []uint8) {
@@ -68,7 +74,16 @@ func NewNES(path string) *NES {
 	n.apu = apu.NewAPU(0)
 	n.cpu = cpu.NewCPU(prg, n.ppu, n.apu)
 	n.canvas = ebiten.NewImage(256, 240)
+	n.isPlay = true
+	pauseBG = ebiten.NewImage(256, 240)
+	pauseBG.Fill(color.Black)
+	pauseOP = &ebiten.DrawImageOptions{}
+	pauseOP.ColorM.Scale(0, 0, 0, 0.5)
 	return n
+}
+
+func (n *NES) SetDebug() {
+	n.isDebug = true
 }
 
 //////////////////////
@@ -77,11 +92,23 @@ func NewNES(path string) *NES {
 //Draw はPPUから画面データを受け取り描画
 func (n *NES) Draw(screen *ebiten.Image) {
 
+	//Draw NES frame
 	background, sprites := n.ppu.Draw()
 	n.canvas.DrawImage(background, nil)
 	n.canvas.DrawImage(sprites, nil)
-	ebitenutil.DebugPrint(n.canvas, fmt.Sprintf("TPS:%0.2f", ebiten.CurrentTPS()))
 
+	//Draw interface
+	if !n.isPlay {
+		n.canvas.DrawImage(pauseBG, pauseOP)
+	} else {
+		if n.isDebug {
+			ebitenutil.DebugPrint(n.canvas, fmt.Sprintf("TPS:%0.2f, %s", ebiten.CurrentTPS(), n.cpu.GetDebugText()))
+		}
+	}
+	if n.isRecording {
+		ebitenutil.DebugPrintAt(n.canvas, "REC", 230, 0)
+	}
+	//x3
 	op := &ebiten.DrawImageOptions{}
 	op.GeoM.Scale(3, 3)
 	screen.DrawImage(n.canvas, op)
@@ -93,20 +120,32 @@ func (n *NES) Layout(screenWidth, screenHeight int) (int, int) {
 }
 
 func (n *NES) Update() error {
-	//PAD
-	for _, id := range inpututil.JustConnectedGamepadIDs() {
-		n.gamepadID = id
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		n.isPlay = !n.isPlay
 	}
-	//
+	if inpututil.IsKeyJustPressed(ebiten.KeyR) {
+		if n.isRecording {
+			ioutil.WriteFile("neslog.log", ([]byte)(n.cpu.DebugLog), 0666)
+			n.cpu.DebugLog = ""
+		}
+		n.isRecording = !n.isRecording
+		n.cpu.IsRecord = n.isRecording
+		n.isPlay = false
+	}
 
-	for k := 0; k < 8; k++ {
-		n.keys[k] = ebiten.IsKeyPressed(keymap[k])
-	}
-	isScreenReady := false
-	for !isScreenReady {
-		cycle := n.cpu.Run(n.keys)
-		isScreenReady = n.ppu.Run(cycle * 3)
-		n.apu.Run(cycle)
+	if n.isPlay {
+		//NES Emulation
+		for k := 0; k < 8; k++ {
+			n.keys[k] = ebiten.IsKeyPressed(keymap[k])
+		}
+		isScreenReady := false
+		for !isScreenReady {
+			cycle := n.cpu.Run(n.keys)
+			isScreenReady = n.ppu.Run(cycle * 3)
+			n.apu.Run(cycle)
+		}
+	} else {
+
 	}
 	return nil
 }
@@ -124,9 +163,9 @@ func (n *NES) Run() {
 	}
 }
 
-func (n *NES) DrawTile(sprites [][]uint8) {
-	n.canvas = ebiten.NewImage(256, 240)
-	n.canvas.Fill(color.Black)
+func (n *NES) DrawPatternTable(sprites [][]uint8) *ebiten.Image {
+	canvas := ebiten.NewImage(256, 240)
+	canvas.Fill(color.Black)
 	for i := 0; i < len(sprites); i++ {
 		image := ebiten.NewImageFromImage(&image.RGBA{
 			Pix:    sprites[i],
@@ -137,6 +176,7 @@ func (n *NES) DrawTile(sprites [][]uint8) {
 		x := i - y*32
 		op := &ebiten.DrawImageOptions{}
 		op.GeoM.Translate(float64(x*8), float64(y*8))
-		n.canvas.DrawImage(image, op)
+		canvas.DrawImage(image, op)
 	}
+	return canvas
 }
