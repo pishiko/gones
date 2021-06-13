@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	//A,B,Select,Start,Up,Down,Left,Right
+	// A,B,Select,Start,Up,Down,Left,Right
 	keymap = []ebiten.Key{
 		ebiten.KeyL,
 		ebiten.KeyK,
@@ -27,8 +27,17 @@ var (
 		ebiten.KeyA,
 		ebiten.KeyD,
 	}
-	pauseBG *ebiten.Image
-	pauseOP *ebiten.DrawImageOptions
+	//A,B,Select,Start
+	padmap = []ebiten.GamepadButton{
+		ebiten.GamepadButton2,
+		ebiten.GamepadButton0,
+		ebiten.GamepadButton6,
+		ebiten.GamepadButton7,
+	}
+	GAMEPAD_AXIS_X = 0
+	GAMEPAD_AXIS_Y = 4
+	pauseBG        *ebiten.Image
+	pauseOP        *ebiten.DrawImageOptions
 )
 
 type NES struct {
@@ -39,9 +48,10 @@ type NES struct {
 	keys      [8]bool
 	gamepadID ebiten.GamepadID
 	//interface
-	isDebug     bool
-	isPlay      bool
-	isRecording bool
+	isDebug          bool
+	isPlay           bool
+	isRecording      bool
+	isGamepadEnabled bool
 }
 
 func Load(path string) ([]uint8, []uint8, []uint8) {
@@ -101,7 +111,13 @@ func (n *NES) Draw(screen *ebiten.Image) {
 	if !n.isPlay {
 		n.canvas.DrawImage(pauseBG, pauseOP)
 	} else {
-		if n.isDebug {
+
+	}
+	if n.isDebug {
+		if !n.isPlay {
+			ebitenutil.DebugPrint(n.canvas, fmt.Sprintf("TPS:%0.2f, %s\nA:%X B:%t X:%X Y:%X", ebiten.CurrentTPS(), n.cpu.GetDebugText(),
+				n.cpu.A, n.cpu.B, n.cpu.X, n.cpu.Y))
+		} else {
 			ebitenutil.DebugPrint(n.canvas, fmt.Sprintf("TPS:%0.2f, %s", ebiten.CurrentTPS(), n.cpu.GetDebugText()))
 		}
 	}
@@ -120,10 +136,18 @@ func (n *NES) Layout(screenWidth, screenHeight int) (int, int) {
 }
 
 func (n *NES) Update() error {
+	if !n.isGamepadEnabled {
+		for _, id := range inpututil.JustConnectedGamepadIDs() {
+			n.gamepadID = id
+			n.isGamepadEnabled = true
+		}
+
+	}
+
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		n.isPlay = !n.isPlay
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyR) {
+	if n.isDebug && inpututil.IsKeyJustPressed(ebiten.KeyR) {
 		if n.isRecording {
 			ioutil.WriteFile("neslog.log", ([]byte)(n.cpu.DebugLog), 0666)
 			n.cpu.DebugLog = ""
@@ -135,8 +159,22 @@ func (n *NES) Update() error {
 
 	if n.isPlay {
 		//NES Emulation
-		for k := 0; k < 8; k++ {
-			n.keys[k] = ebiten.IsKeyPressed(keymap[k])
+		if n.isGamepadEnabled {
+			for k := 0; k < 4; k++ {
+				n.keys[k] = ebiten.IsGamepadButtonPressed(n.gamepadID, padmap[k])
+			}
+			x := ebiten.GamepadAxis(n.gamepadID, GAMEPAD_AXIS_X)
+			y := ebiten.GamepadAxis(n.gamepadID, GAMEPAD_AXIS_Y)
+			//WSAD
+			n.keys[4] = y < -0.5
+			n.keys[5] = y > 0.5
+			n.keys[6] = x < -0.5
+			n.keys[7] = x > 0.5
+
+		} else {
+			for k := 0; k < 8; k++ {
+				n.keys[k] = ebiten.IsKeyPressed(keymap[k])
+			}
 		}
 		isScreenReady := false
 		for !isScreenReady {
