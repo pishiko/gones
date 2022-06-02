@@ -1,4 +1,4 @@
-# NES Emulator by Golang
+# Golang NES Emulator
 
 Blog👉https://p4ko.com/posts/nes1/
 
